@@ -5,16 +5,14 @@ class Customer {
   Customer({this.id, required this.name});
 
   Map<String, dynamic> toMap() {
-    return {
-      'id': id,
-      'name': name,
-    };
+    return {'id': id, 'name': name};
+  }
+
+  Map<String, dynamic> toJson() {
+    return {'id': id, 'name': name};
   }
 
   factory Customer.fromMap(Map<String, dynamic> map) {
-    return Customer(
-      id: map['id'],
-      name: map['name'],
-    );
+    return Customer(id: map['id'], name: map['name']);
   }
 }

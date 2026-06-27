@@ -4,7 +4,7 @@ import 'package:flutter/foundation.dart'
 
 /// Default [FirebaseOptions] for use with your Firebase apps.
 ///
-/// Example:
+/// To configure your app with the Firebase setup, use this:
 /// ```dart
 /// import 'firebase_options.dart';
 /// // ...
@@ -49,8 +49,8 @@ class DefaultFirebaseOptions {
   );
 
   static const FirebaseOptions android = FirebaseOptions(
-    apiKey: 'AIzaSyCGnVQDEenr7D7dWxcGYQ-ZN5U7ripuFR0',
-    appId: '1:380811070412:android:4cf213ee0bfefe51d3eb69',
+    apiKey: 'AIzaSyCGnVQDEenr7d7WxcGYQ-ZN5U7ripuFR0',
+    appId: '1:380811070412:android:f88c23ba39c5c561d3eb69',
     messagingSenderId: '380811070412',
     projectId: 'aapni-dairy',
     storageBucket: 'aapni-dairy.firebasestorage.app',
@@ -62,7 +62,7 @@ class DefaultFirebaseOptions {
     messagingSenderId: '123456789012',
     projectId: 'aapni-dairy',
     storageBucket: 'aapni-dairy.appspot.com',
-    iosBundleId: 'com.example.aapniDairy',
+    iosBundleId: 'com.example.aapnidairy',
   );
 
   static const FirebaseOptions macos = FirebaseOptions(
@@ -71,7 +71,7 @@ class DefaultFirebaseOptions {
     messagingSenderId: '123456789012',
     projectId: 'aapni-dairy',
     storageBucket: 'aapni-dairy.appspot.com',
-    iosBundleId: 'com.example.aapniDairy',
+    iosBundleId: 'com.example.aapnidairy',
   );
 
   static const FirebaseOptions windows = FirebaseOptions(

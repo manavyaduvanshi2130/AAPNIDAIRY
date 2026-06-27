@@ -1,11 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../constants.dart';
+import '../db/db_helper.dart';
+import '../l10n/app_localizations.dart';
+import '../services/auth_service.dart';
+import '../services/drive_service.dart';
 
 class SettingsScreen extends StatefulWidget {
   final VoidCallback? onSaved;
+  final Function(Locale)? onLocaleChanged;
 
-  const SettingsScreen({super.key, this.onSaved});
+  const SettingsScreen({super.key, this.onSaved, this.onLocaleChanged});
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
@@ -17,50 +23,104 @@ class _SettingsScreenState extends State<SettingsScreen> {
   final TextEditingController _ownerNameController = TextEditingController();
   final TextEditingController _mobileController = TextEditingController();
 
+  // Drive Service Instance
+  final DriveService _driveService = DriveService();
+
   @override
   void initState() {
     super.initState();
     _loadExistingData();
   }
 
+  // --- BACKUP LOGIC ---
+  void _backupToDrive() async {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const Center(child: CircularProgressIndicator()),
+    );
+
+    try {
+      final data = await DatabaseHelper().getAllDataForBackup();
+      bool success = await _driveService.uploadBackup(data);
+
+      Navigator.pop(context); // Close dialog
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(success ? "Backup Success!" : "Backup Failed!")),
+      );
+    } catch (e) {
+      Navigator.pop(context);
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text("Error: $e")));
+    }
+  }
+
+  // --- RESTORE LOGIC ---
+  void _restoreFromDrive() async {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const Center(child: CircularProgressIndicator()),
+    );
+
+    try {
+      final data = await _driveService.downloadBackup();
+      Navigator.pop(context); // Close dialog
+
+      if (data != null) {
+        await DatabaseHelper().restoreFromBackup(data);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Restore Success! Please restart the app."),
+          ),
+        );
+        _loadExistingData(); // Refresh UI fields
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("No Backup Found on Google Drive!")),
+        );
+      }
+    } catch (e) {
+      Navigator.pop(context);
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text("Restore Error: $e")));
+    }
+  }
+
   Future<void> _loadExistingData() async {
-    final prefs = await SharedPreferences.getInstance();
+    final dairyDetails = await DatabaseHelper().getDairyDetails();
     setState(() {
-      _dairyNameController.text = prefs.getString('dairyName') ?? '';
-      _ownerNameController.text = prefs.getString('ownerName') ?? '';
-      _mobileController.text = prefs.getString('mobileNumber') ?? '';
+      _dairyNameController.text = dairyDetails['dairyName'] ?? '';
+      _ownerNameController.text = dairyDetails['ownerName'] ?? '';
+      _mobileController.text = dairyDetails['mobileNumber'] ?? '';
     });
   }
 
   Future<void> _saveData() async {
     if (_formKey.currentState!.validate()) {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('dairyName', _dairyNameController.text);
-      await prefs.setString('ownerName', _ownerNameController.text);
-      await prefs.setString('mobileNumber', _mobileController.text);
-
-      // Update constants
-      Constants.dairyName = _dairyNameController.text;
-      Constants.ownerName = _ownerNameController.text;
-      Constants.mobileNumber = _mobileController.text;
-
+      await DatabaseHelper().saveDairyDetails(
+        dairyName: _dairyNameController.text,
+        ownerName: _ownerNameController.text,
+        mobileNumber: _mobileController.text,
+      );
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Settings saved successfully')),
       );
-
       widget.onSaved?.call();
-
       Navigator.of(context).pop();
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final localizations = AppLocalizations.of(context);
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Settings'),
+        title: Text(localizations.settings),
         backgroundColor: Colors.blue.shade700,
-        elevation: 4,
       ),
       body: Container(
         decoration: BoxDecoration(
@@ -70,110 +130,160 @@ class _SettingsScreenState extends State<SettingsScreen> {
             colors: [Colors.blue.shade50, Colors.white],
           ),
         ),
-        child: Padding(
+        child: SingleChildScrollView(
           padding: const EdgeInsets.all(16.0),
-          child: Form(
-            key: _formKey,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                const SizedBox(height: 20),
-                Text(
-                  'Edit Dairy Details',
-                  style: TextStyle(
-                    fontSize: 24,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.blue.shade800,
-                  ),
-                  textAlign: TextAlign.center,
+          child: Column(
+            children: [
+              // --- Cloud Backup Section ---
+              Card(
+                elevation: 4,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
                 ),
-                const SizedBox(height: 8),
-                Text(
-                  'These details will appear on all PDF exports',
-                  style: TextStyle(
-                    color: Colors.grey.shade600,
-                    fontSize: 14,
-                  ),
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 40),
-                TextFormField(
-                  controller: _dairyNameController,
-                  decoration: const InputDecoration(
-                    labelText: 'Dairy Name',
-                    border: OutlineInputBorder(),
-                    prefixIcon: Icon(Icons.business),
-                  ),
-                  validator: (value) {
-                    if (value == null || value.isEmpty) {
-                      return 'Please enter dairy name';
-                    }
-                    return null;
-                  },
-                ),
-                const SizedBox(height: 16),
-                TextFormField(
-                  controller: _ownerNameController,
-                  decoration: const InputDecoration(
-                    labelText: 'Owner Name',
-                    border: OutlineInputBorder(),
-                    prefixIcon: Icon(Icons.person),
-                  ),
-                  validator: (value) {
-                    if (value == null || value.isEmpty) {
-                      return 'Please enter owner name';
-                    }
-                    return null;
-                  },
-                ),
-                const SizedBox(height: 16),
-                TextFormField(
-                  controller: _mobileController,
-                  decoration: const InputDecoration(
-                    labelText: 'Mobile Number',
-                    border: OutlineInputBorder(),
-                    prefixIcon: Icon(Icons.phone),
-                  ),
-                  keyboardType: TextInputType.phone,
-                  validator: (value) {
-                    if (value == null || value.isEmpty) {
-                      return 'Please enter mobile number';
-                    }
-                    if (value.length != 10) {
-                      return 'Please enter valid 10-digit mobile number';
-                    }
-                    return null;
-                  },
-                ),
-                const SizedBox(height: 32),
-                ElevatedButton(
-                  onPressed: _saveData,
-                  style: ElevatedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                    backgroundColor: Colors.blue.shade700,
-                    foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
+                child: Column(
+                  children: [
+                    ListTile(
+                      title: const Text(
+                        "Google Drive Backup",
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      subtitle: const Text("Keep your data safe in the cloud"),
+                      leading: Icon(
+                        Icons.cloud_done,
+                        color: Colors.blue.shade700,
+                      ),
                     ),
-                  ),
-                  child: const Text(
-                    'Save Settings',
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                    const Divider(),
+                    ListTile(
+                      title: const Text("Backup Now"),
+                      leading: const Icon(
+                        Icons.cloud_upload,
+                        color: Colors.green,
+                      ),
+                      onTap: _backupToDrive,
+                    ),
+                    ListTile(
+                      title: const Text("Restore Data"),
+                      leading: const Icon(
+                        Icons.cloud_download,
+                        color: Colors.orange,
+                      ),
+                      onTap: _restoreFromDrive,
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 20),
+
+              // --- Language Card ---
+              Card(
+                elevation: 4,
+                child: Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: Column(
+                    children: [
+                      Text(
+                        'Language',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.blue.shade800,
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: ElevatedButton(
+                              onPressed: () => widget.onLocaleChanged?.call(
+                                const Locale('en'),
+                              ),
+                              child: const Text('English'),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: ElevatedButton(
+                              onPressed: () => widget.onLocaleChanged?.call(
+                                const Locale('hi'),
+                              ),
+                              child: const Text('हिंदी'),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
                   ),
                 ),
-              ],
-            ),
+              ),
+              const SizedBox(height: 20),
+
+              // --- Dairy Details Form ---
+              Form(
+                key: _formKey,
+                child: Column(
+                  children: [
+                    TextFormField(
+                      controller: _dairyNameController,
+                      decoration: InputDecoration(
+                        labelText: localizations.dairyName,
+                        border: OutlineInputBorder(),
+                      ),
+                      validator: (value) {
+                        if (value == null || value.isEmpty) {
+                          return localizations.enterDairyName;
+                        }
+                        return null;
+                      },
+                    ),
+                    const SizedBox(height: 16),
+                    TextFormField(
+                      controller: _ownerNameController,
+                      decoration: InputDecoration(
+                        labelText: localizations.ownerName,
+                        border: OutlineInputBorder(),
+                      ),
+                      validator: (value) {
+                        if (value == null || value.isEmpty) {
+                          return localizations.enterOwnerName;
+                        }
+                        return null;
+                      },
+                    ),
+                    const SizedBox(height: 16),
+                    TextFormField(
+                      controller: _mobileController,
+                      decoration: InputDecoration(
+                        labelText: localizations.mobileNumber,
+                        border: OutlineInputBorder(),
+                        prefixIcon: Icon(Icons.phone),
+                      ),
+                      keyboardType: TextInputType.phone,
+                      validator: (value) {
+                        if (value == null || value.isEmpty) {
+                          return localizations.enterMobileNumber;
+                        }
+                        if (value.length != 10) {
+                          return localizations.enterValidMobile;
+                        }
+                        return null;
+                      },
+                    ),
+                    const SizedBox(height: 24),
+                    ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        minimumSize: const Size(double.infinity, 50),
+                      ),
+                      onPressed: _saveData,
+                      child: Text(localizations.saveSettings),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
         ),
       ),
     );
-  }
-
-  @override
-  void dispose() {
-    _dairyNameController.dispose();
-    _ownerNameController.dispose();
-    _mobileController.dispose();
-    super.dispose();
   }
 }

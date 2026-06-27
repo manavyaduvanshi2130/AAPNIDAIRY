@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:aapni_dairy/db/db_helper.dart';
 import 'package:aapni_dairy/models/milk_entry.dart';
+import 'package:aapni_dairy/constants.dart';
 
 class EditMilkEntryScreen extends StatefulWidget {
   final MilkEntry entry;
@@ -17,21 +18,30 @@ class _EditMilkEntryScreenState extends State<EditMilkEntryScreen> {
 
   late TextEditingController quantityController;
   late TextEditingController fatController;
+  late TextEditingController snfKatotiController;
 
   @override
   void initState() {
     super.initState();
-    quantityController =
-        TextEditingController(text: widget.entry.quantity.toString());
+    quantityController = TextEditingController(
+      text: widget.entry.quantity.toString(),
+    );
     fatController = TextEditingController(text: widget.entry.fat.toString());
+    snfKatotiController = TextEditingController(
+      text: widget.entry.snfKatoti.toString(),
+    );
   }
 
   void _saveEntry() async {
     if (_formKey.currentState!.validate()) {
       double fat = double.parse(fatController.text);
       double qty = double.parse(quantityController.text);
-      double rate = 8 * fat + 2;
+      double snfKatoti = double.parse(snfKatotiController.text);
+      // New logic: snfKatoti is per-liter ₹ deduction, so it reduces rate directly.
+      double rate =
+          (Constants.rateConstantA * fat) + Constants.rateConstantB - snfKatoti;
       double amount = rate * qty;
+      double payableAmount = amount;
 
       MilkEntry updated = MilkEntry(
         id: widget.entry.id,
@@ -40,8 +50,10 @@ class _EditMilkEntryScreenState extends State<EditMilkEntryScreen> {
         shift: widget.entry.shift,
         quantity: qty,
         fat: fat,
+        snf: widget.entry.snf,
         rate: rate,
         amount: amount,
+        snfKatoti: snfKatoti,
       );
 
       await dbHelper.updateMilkEntry(updated);
@@ -63,14 +75,20 @@ class _EditMilkEntryScreenState extends State<EditMilkEntryScreen> {
                 controller: quantityController,
                 decoration: const InputDecoration(labelText: "Quantity (L)"),
                 keyboardType: TextInputType.number,
-                validator: (value) =>
-                    value!.isEmpty ? "Enter quantity" : null,
+                validator: (value) => value!.isEmpty ? "Enter quantity" : null,
               ),
               TextFormField(
                 controller: fatController,
                 decoration: const InputDecoration(labelText: "Fat"),
                 keyboardType: TextInputType.number,
                 validator: (value) => value!.isEmpty ? "Enter fat" : null,
+              ),
+              TextFormField(
+                controller: snfKatotiController,
+                decoration: const InputDecoration(labelText: "SNF Katoti"),
+                keyboardType: TextInputType.number,
+                validator: (value) =>
+                    value!.isEmpty ? "Enter SNF Katoti" : null,
               ),
               const SizedBox(height: 20),
               ElevatedButton(

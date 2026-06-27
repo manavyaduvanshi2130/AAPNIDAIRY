@@ -19,10 +19,27 @@ class _ExportCustomerPdfScreenState extends State<ExportCustomerPdfScreen> {
   DateTime _end = DateTime.now();
   String _selectedMethod = 'Method 1';
 
+  // OFF => without khatabook (milk table only + totals)
+  // ON  => current detailed/khata format
+  bool _showKhataBookFormat = false;
+
   String _selectedPageFormat = 'A4';
   double _titleFontSize = Constants.defaultTitleFontSize;
   double _tableFontSize = Constants.defaultTableFontSize;
   bool _autoFitText = true;
+
+  DateTime _parseDbDate(String s) {
+    try {
+      return DateTime.parse(s);
+    } catch (_) {
+      try {
+        final d = DateFormat('yyyy-MM-dd').parse(s);
+        return DateTime(d.year, d.month, d.day);
+      } catch (_) {
+        return DateTime.now();
+      }
+    }
+  }
 
   Future<void> _pickDate(bool isStart) async {
     final picked = await showDatePicker(
@@ -44,12 +61,24 @@ class _ExportCustomerPdfScreenState extends State<ExportCustomerPdfScreen> {
     }
   }
 
+  // NOTE: Customer summary PDF me dono method ke liye new rate formula apply karna hai.
+  // Existing code me rate calculation A*fat + B - snfKatoti thi.
+  // Yahi update karke display me mismatch nahi aayega.
+  double _calcRate(MilkEntry entry) {
+    final snfKatoti = entry.snfKatoti;
+    return (Constants.rateConstantA * entry.fat) +
+        Constants.rateConstantB -
+        snfKatoti;
+  }
+
+  double _calcAmount(MilkEntry entry) {
+    // Always recalc amount from new rate so Method 2 me bhi consistent rahe.
+    return _calcRate(entry) * entry.quantity;
+  }
+
   Map<String, double> _calculateFontSizes(int entryCount) {
     if (!_autoFitText) {
-      return {
-        'title': _titleFontSize,
-        'table': _tableFontSize,
-      };
+      return {'title': _titleFontSize, 'table': _tableFontSize};
     }
 
     const double baseTitleSize = 20.0;
@@ -59,10 +88,14 @@ class _ExportCustomerPdfScreenState extends State<ExportCustomerPdfScreen> {
     double scaleFactor = baseEntryCount / entryCount.clamp(1, 50);
 
     return {
-      'title': (baseTitleSize * scaleFactor)
-          .clamp(Constants.minFontSize, Constants.maxFontSize),
-      'table': (baseTableSize * scaleFactor)
-          .clamp(Constants.minFontSize, Constants.maxFontSize),
+      'title': (baseTitleSize * scaleFactor).clamp(
+        Constants.minFontSize,
+        Constants.maxFontSize,
+      ),
+      'table': (baseTableSize * scaleFactor).clamp(
+        Constants.minFontSize,
+        Constants.maxFontSize,
+      ),
     };
   }
 
@@ -94,13 +127,13 @@ class _ExportCustomerPdfScreenState extends State<ExportCustomerPdfScreen> {
         if (!customerEntries.containsKey(custId)) {
           customerEntries[custId] = [];
           customerNames[custId] =
-              await db.getCustomerNameById(custId) ?? "Unknown";
+              await db.getCustomerNameById(custId) ?? 'Unknown';
         }
         customerEntries[custId]!.add(entry);
       }
 
       // Sort customer IDs in ascending order
-      List<int> sortedCustomerIds = customerEntries.keys.toList()..sort();
+      final sortedCustomerIds = customerEntries.keys.toList()..sort();
 
       final pdfDoc = pw.Document();
 
@@ -108,16 +141,86 @@ class _ExportCustomerPdfScreenState extends State<ExportCustomerPdfScreen> {
         final customerName = customerNames[custId]!;
         final custEntries = customerEntries[custId]!;
 
-        double totalQuantity =
-            custEntries.fold(0, (sum, entry) => sum + entry.quantity);
-        double totalAmount =
-            custEntries.fold(0, (sum, entry) => sum + entry.amount);
+        // MILK totals
+        double totalQuantity = custEntries.fold(
+          0,
+          (sum, entry) => sum + entry.quantity,
+        );
+        double totalMilkAmount = custEntries.fold(
+          0,
+          (sum, entry) => sum + entry.amount,
+        );
+        // amount is already calculated as payable.
+        // SNF katoti / payable deduction ko customer PDF summary me show nahi karna.
+        final double totalMilkPayable = totalMilkAmount;
 
-        // Split entries into chunks of 30
-        List<List<MilkEntry>> chunks = [];
+        // Khata totals within selected range
+
+        final startStr = DateFormat('yyyy-MM-dd').format(_start);
+
+        final endStr = DateFormat('yyyy-MM-dd').format(_end);
+
+        // Opening totals (ledger effect) BEFORE startDate
+        final openingMilk = await db.getMilkTotalBeforeCustomerDate(
+          custId,
+          startStr,
+        );
+        final openingYouGot = await db.getYouGotTotalBeforeCustomerDate(
+          custId,
+          startStr,
+        );
+        final openingYouGave = await db.getYouGaveTotalBeforeCustomerDate(
+          custId,
+          startStr,
+        );
+        final openingProductSale = await db
+            .getProductSaleTotalBeforeCustomerDate(custId, startStr);
+
+        final openingBalance =
+            openingMilk + openingYouGot - openingYouGave - openingProductSale;
+
+        final youGotRows = await db.getYouGotEntriesByCustomerAndRange(
+          custId,
+          startStr,
+          endStr,
+        );
+        final youGaveRows = await db.getYouGaveEntriesByCustomerAndRange(
+          custId,
+          startStr,
+          endStr,
+        );
+        final productRows = await db.getProductSaleEntriesByCustomerAndRange(
+          custId,
+          startStr,
+          endStr,
+        );
+
+        final totalYouGot = youGotRows.fold(
+          0.0,
+          (sum, r) => sum + (r['amount'] as num).toDouble(),
+        );
+        final totalYouGave = youGaveRows.fold(
+          0.0,
+          (sum, r) => sum + (r['amount'] as num).toDouble(),
+        );
+        final totalProductSale = productRows.fold(
+          0.0,
+          (sum, r) => sum + (r['amount'] as num).toDouble(),
+        );
+
+        // FINAL FORMULA (CustomerLedgerDetailScreen): milk + youGot - youGave - productSale
+        final finalBalance =
+            totalMilkPayable + totalYouGot - totalYouGave - totalProductSale;
+
+        // Split milk entries into chunks of 30
+        final chunks = <List<MilkEntry>>[];
         for (int i = 0; i < custEntries.length; i += 30) {
-          chunks.add(custEntries.sublist(
-              i, i + 30 > custEntries.length ? custEntries.length : i + 30));
+          chunks.add(
+            custEntries.sublist(
+              i,
+              i + 30 > custEntries.length ? custEntries.length : i + 30,
+            ),
+          );
         }
 
         for (int pageIndex = 0; pageIndex < chunks.length; pageIndex++) {
@@ -128,7 +231,8 @@ class _ExportCustomerPdfScreenState extends State<ExportCustomerPdfScreen> {
             pw.Page(
               pageFormat: Constants.pageFormats[_selectedPageFormat]!,
               build: (pw.Context context) {
-                double pageWidth = Constants.pageFormats[_selectedPageFormat]!.width;
+                final pageWidth =
+                    Constants.pageFormats[_selectedPageFormat]!.width;
 
                 final pw.Widget table = _selectedMethod == 'Method 1'
                     ? pw.Table.fromTextArray(
@@ -137,7 +241,7 @@ class _ExportCustomerPdfScreenState extends State<ExportCustomerPdfScreen> {
                           fontWeight: pw.FontWeight.bold,
                         ),
                         cellStyle: pw.TextStyle(fontSize: fontSizes['table']),
-                        headers: [
+                        headers: const [
                           'Date',
                           'Shift',
                           'Quantity',
@@ -148,12 +252,36 @@ class _ExportCustomerPdfScreenState extends State<ExportCustomerPdfScreen> {
                         data: chunk
                             .map(
                               (entry) => [
-                                entry.date,
-                                entry.shift,
+                                DateFormat(
+                                  'dd-MM-yyyy',
+                                ).format(DateTime.parse(entry.date)),
+                                (entry.shift
+                                            .toString()
+                                            .trim()
+                                            .toLowerCase()
+                                            .contains('morning') ||
+                                        entry.shift
+                                                .toString()
+                                                .trim()
+                                                .toLowerCase() ==
+                                            'm')
+                                    ? 'M'
+                                    : (entry.shift
+                                              .toString()
+                                              .trim()
+                                              .toLowerCase()
+                                              .contains('evening') ||
+                                          entry.shift
+                                                  .toString()
+                                                  .trim()
+                                                  .toLowerCase() ==
+                                              'e')
+                                    ? 'E'
+                                    : entry.shift.toString(),
                                 entry.quantity.toStringAsFixed(2),
                                 entry.fat.toStringAsFixed(2),
-                                entry.rate.toStringAsFixed(2),
-                                entry.amount.toStringAsFixed(2),
+                                _calcRate(entry).toStringAsFixed(2),
+                                _calcAmount(entry).toStringAsFixed(2),
                               ],
                             )
                             .toList(),
@@ -164,58 +292,179 @@ class _ExportCustomerPdfScreenState extends State<ExportCustomerPdfScreen> {
                           fontWeight: pw.FontWeight.bold,
                         ),
                         cellStyle: pw.TextStyle(fontSize: fontSizes['table']),
-                        headers: ['Date', 'Shift', 'Quantity', 'Fat', 'SNF', 'Amount'],
+                        headers: const [
+                          'Date',
+                          'Shift',
+                          'Quantity',
+                          'Fat',
+                          'SNF',
+                          'Amount',
+                        ],
                         data: chunk
                             .map(
                               (entry) => [
-                                entry.date,
-                                entry.shift,
+                                DateFormat(
+                                  'dd-MM-yyyy',
+                                ).format(DateTime.parse(entry.date)),
+                                (entry.shift
+                                            .toString()
+                                            .trim()
+                                            .toLowerCase()
+                                            .contains('morning') ||
+                                        entry.shift
+                                                .toString()
+                                                .trim()
+                                                .toLowerCase() ==
+                                            'm')
+                                    ? 'M'
+                                    : (entry.shift
+                                              .toString()
+                                              .trim()
+                                              .toLowerCase()
+                                              .contains('evening') ||
+                                          entry.shift
+                                                  .toString()
+                                                  .trim()
+                                                  .toLowerCase() ==
+                                              'e')
+                                    ? 'E'
+                                    : entry.shift.toString(),
                                 entry.quantity.toStringAsFixed(2),
                                 entry.fat.toStringAsFixed(2),
                                 entry.snf.toStringAsFixed(2),
-                                entry.amount.toStringAsFixed(2),
+                                _calcAmount(entry).toStringAsFixed(2),
                               ],
                             )
                             .toList(),
                       );
 
                 return pw.Container(
-                  width: pageWidth * 2 / 3,
-                  child: pw.Column(
+                  width: pageWidth * 3 / 4,
+                  margin: pw.EdgeInsets.only(right: pageWidth / 4),
+                  child: pw.Stack(
                     children: [
-                      pw.Text(
-                        Constants.dairyName,
-                        style: pw.TextStyle(
-                          fontSize: fontSizes['title'],
-                          fontWeight: pw.FontWeight.bold,
+                      // Watermark behind content (middle)
+                      pw.Positioned.fill(
+                        child: pw.Center(
+                          child: pw.Opacity(
+                            opacity: 0.08,
+                            child: pw.Transform.rotate(
+                              angle: -0.35,
+                              child: pw.Text(
+                                'AAPNI DAIRY',
+                                style: pw.TextStyle(
+                                  fontSize: 48,
+                                  fontWeight: pw.FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                          ),
                         ),
                       ),
-                      pw.Text(
-                        '${Constants.ownerName} Mob:${Constants.mobileNumber}',
-                        style: pw.TextStyle(fontSize: fontSizes['table']),
+
+                      // Foreground content
+                      pw.Column(
+                        children: [
+                          pw.Container(
+                            padding: const pw.EdgeInsets.only(top: 40),
+                            child: pw.Column(
+                              crossAxisAlignment: pw.CrossAxisAlignment.start,
+                              children: [
+                                pw.Text(
+                                  Constants.dairyName,
+                                  style: pw.TextStyle(
+                                    fontSize: fontSizes['title'],
+                                    fontWeight: pw.FontWeight.bold,
+                                  ),
+                                ),
+                                pw.Text(
+                                  '${Constants.ownerName} Mob:${Constants.mobileNumber}',
+                                  style: pw.TextStyle(
+                                    fontSize: fontSizes['table'],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+
+                          pw.SizedBox(height: 10),
+
+                          pw.Text(
+                            'Customer: $customerName (ID: $custId)',
+                            style: pw.TextStyle(fontSize: fontSizes['table']),
+                          ),
+                          pw.Text(
+                            'Date Range: ' +
+                                DateFormat('dd-MM-yyyy').format(_start) +
+                                ' to ' +
+                                DateFormat('dd-MM-yyyy').format(_end),
+                            style: pw.TextStyle(fontSize: fontSizes['table']),
+                          ),
+                          pw.SizedBox(height: 10),
+
+                          table,
+
+                          if (pageIndex == chunks.length - 1) ...[
+                            pw.SizedBox(height: 20),
+
+                            // Always show totals
+                            pw.Text(
+                              'Total Quantity: ${totalQuantity.toStringAsFixed(2)}',
+                              style: pw.TextStyle(fontSize: fontSizes['table']),
+                            ),
+                            pw.Text(
+                              'Total Amount: ${totalMilkAmount.toStringAsFixed(2)}',
+                              style: pw.TextStyle(fontSize: fontSizes['table']),
+                            ),
+
+                            if (_showKhataBookFormat) ...[
+                              pw.SizedBox(height: 10),
+                              pw.Text(
+                                'WE GOT: ${totalYouGot.toStringAsFixed(2)} aap se liye',
+                                style: pw.TextStyle(
+                                  fontSize: fontSizes['table'],
+                                ),
+                              ),
+                              pw.Text(
+                                'WE GAVE: ${totalYouGave.toStringAsFixed(2)} aap ko diye',
+                                style: pw.TextStyle(
+                                  fontSize: fontSizes['table'],
+                                ),
+                              ),
+                              pw.Text(
+                                'PRODUCT SALE: ${totalProductSale.toStringAsFixed(2)} ',
+                                style: pw.TextStyle(
+                                  fontSize: fontSizes['table'],
+                                ),
+                              ),
+                              pw.SizedBox(height: 6),
+                              pw.Text(
+                                'Opening Balance (Pichla) (before ${DateFormat('dd-MM-yyyy').format(_start)}): ${openingBalance >= 0 ? '+' : '-'}${openingBalance.abs().toStringAsFixed(2)}',
+                                style: pw.TextStyle(
+                                  fontSize: fontSizes['table'],
+                                ),
+                              ),
+                              pw.SizedBox(height: 4),
+                              pw.Text(
+                                'Final Balance with Opening: ${(openingBalance + finalBalance).toStringAsFixed(2)}',
+                                style: pw.TextStyle(
+                                  fontSize: fontSizes['table'],
+                                ),
+                              ),
+                              pw.SizedBox(height: 4),
+                              pw.Text(
+                                (openingBalance + finalBalance) >= 0
+                                    ? 'Customer Ko Dena Hai'
+                                    : 'Customer Se Lena Hai',
+                                style: pw.TextStyle(
+                                  fontSize: fontSizes['table'],
+                                  fontWeight: pw.FontWeight.bold,
+                                ),
+                              ),
+                            ],
+                          ],
+                        ],
                       ),
-                      pw.SizedBox(height: 10),
-                      pw.Text(
-                        'Customer: $customerName (ID: $custId)',
-                        style: pw.TextStyle(fontSize: fontSizes['table']),
-                      ),
-                      pw.Text(
-                        'Date Range: ' + DateFormat("dd-MM-yyyy").format(_start) + ' to ' + DateFormat("dd-MM-yyyy").format(_end),
-                        style: pw.TextStyle(fontSize: fontSizes['table']),
-                      ),
-                      pw.SizedBox(height: 10),
-                      table,
-                      if (pageIndex == chunks.length - 1) ...[
-                        pw.SizedBox(height: 20),
-                        pw.Text(
-                          'Total Quantity: ${totalQuantity.toStringAsFixed(2)}',
-                          style: pw.TextStyle(fontSize: fontSizes['table']),
-                        ),
-                        pw.Text(
-                          'Total Amount: ${totalAmount.toStringAsFixed(2)}',
-                          style: pw.TextStyle(fontSize: fontSizes['table']),
-                        ),
-                      ],
                     ],
                   ),
                 );
@@ -227,6 +476,7 @@ class _ExportCustomerPdfScreenState extends State<ExportCustomerPdfScreen> {
 
       return pdfDoc.save();
     } catch (e, stack) {
+      // ignore: avoid_print
       print('Error generating customer PDF: $e\n$stack');
       final pdf = pw.Document();
       pdf.addPage(
@@ -245,7 +495,7 @@ class _ExportCustomerPdfScreenState extends State<ExportCustomerPdfScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: Text('Export Customer PDF'),
+        title: const Text('Export Customer PDF'),
         backgroundColor: Colors.blue.shade700,
         elevation: 4,
       ),
@@ -270,39 +520,38 @@ class _ExportCustomerPdfScreenState extends State<ExportCustomerPdfScreen> {
                     color: Colors.grey.withOpacity(0.2),
                     spreadRadius: 2,
                     blurRadius: 5,
-                    offset: Offset(0, 3),
+                    offset: const Offset(0, 3),
                   ),
                 ],
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
+                  const Text(
                     'Select Date Range',
                     style: TextStyle(
                       fontSize: 18,
                       fontWeight: FontWeight.bold,
-                      color: Colors.blue.shade700,
+                      color: Colors.black87,
                     ),
                   ),
-                  SizedBox(height: 16),
+                  const SizedBox(height: 16),
                   Row(
                     children: [
-                      // Start Date
                       Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(
+                            const Text(
                               'Start Date',
                               style: TextStyle(
                                 fontWeight: FontWeight.w500,
-                                color: Colors.grey.shade700,
+                                color: Colors.black54,
                               ),
                             ),
-                            SizedBox(height: 4),
+                            const SizedBox(height: 4),
                             Container(
-                              padding: EdgeInsets.all(16),
+                              padding: const EdgeInsets.all(16),
                               decoration: BoxDecoration(
                                 border: Border.all(color: Colors.grey.shade300),
                                 borderRadius: BorderRadius.circular(8),
@@ -312,9 +561,9 @@ class _ExportCustomerPdfScreenState extends State<ExportCustomerPdfScreen> {
                                 children: [
                                   Text(
                                     df.format(_start),
-                                    style: TextStyle(fontSize: 16),
+                                    style: const TextStyle(fontSize: 16),
                                   ),
-                                  SizedBox(height: 8),
+                                  const SizedBox(height: 8),
                                   GestureDetector(
                                     onTap: () => _pickDate(true),
                                     child: Icon(
@@ -329,22 +578,21 @@ class _ExportCustomerPdfScreenState extends State<ExportCustomerPdfScreen> {
                           ],
                         ),
                       ),
-                      SizedBox(width: 16),
-                      // End Date
+                      const SizedBox(width: 16),
                       Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(
+                            const Text(
                               'End Date',
                               style: TextStyle(
                                 fontWeight: FontWeight.w500,
-                                color: Colors.grey.shade700,
+                                color: Colors.black54,
                               ),
                             ),
-                            SizedBox(height: 4),
+                            const SizedBox(height: 4),
                             Container(
-                              padding: EdgeInsets.all(16),
+                              padding: const EdgeInsets.all(16),
                               decoration: BoxDecoration(
                                 border: Border.all(color: Colors.grey.shade300),
                                 borderRadius: BorderRadius.circular(8),
@@ -354,9 +602,9 @@ class _ExportCustomerPdfScreenState extends State<ExportCustomerPdfScreen> {
                                 children: [
                                   Text(
                                     df.format(_end),
-                                    style: TextStyle(fontSize: 16),
+                                    style: const TextStyle(fontSize: 16),
                                   ),
-                                  SizedBox(height: 8),
+                                  const SizedBox(height: 8),
                                   GestureDetector(
                                     onTap: () => _pickDate(false),
                                     child: Icon(
@@ -373,7 +621,7 @@ class _ExportCustomerPdfScreenState extends State<ExportCustomerPdfScreen> {
                       ),
                     ],
                   ),
-                  SizedBox(height: 16),
+                  const SizedBox(height: 16),
                   DropdownButton<String>(
                     value: _selectedMethod,
                     items: const [
@@ -388,70 +636,86 @@ class _ExportCustomerPdfScreenState extends State<ExportCustomerPdfScreen> {
                     ],
                     onChanged: (value) {
                       if (value != null) {
-                        setState(() {
-                          _selectedMethod = value;
-                        });
+                        setState(() => _selectedMethod = value);
                       }
                     },
                   ),
-                  SizedBox(height: 16),
-                  Text(
+                  const SizedBox(height: 16),
+                  const Text(
                     'Page Format',
                     style: TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.w500,
-                      color: Colors.grey.shade700,
+                      color: Colors.black54,
                     ),
                   ),
-                  SizedBox(height: 8),
+                  const SizedBox(height: 8),
                   DropdownButton<String>(
                     value: _selectedPageFormat,
                     isExpanded: true,
-                    items: Constants.pageFormats.keys.map((format) {
-                      return DropdownMenuItem(
-                        value: format,
-                        child: Text(format),
-                      );
-                    }).toList(),
+                    items: Constants.pageFormats.keys
+                        .map(
+                          (format) => DropdownMenuItem(
+                            value: format,
+                            child: Text(format),
+                          ),
+                        )
+                        .toList(),
                     onChanged: (value) {
                       if (value != null) {
-                        setState(() {
-                          _selectedPageFormat = value;
-                        });
+                        setState(() => _selectedPageFormat = value);
                       }
                     },
                   ),
-                  SizedBox(height: 16),
+                  const SizedBox(height: 16),
                   Row(
                     children: [
-                      Text(
-                        'Auto-fit Text',
+                      const Text(
+                        'Khata Book format',
                         style: TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.w500,
-                          color: Colors.grey.shade700,
+                          color: Colors.black54,
                         ),
                       ),
-                      Spacer(),
+                      const Spacer(),
                       Switch(
-                        value: _autoFitText,
-                        onChanged: (value) {
-                          setState(() {
-                            _autoFitText = value;
-                          });
-                        },
+                        value: _showKhataBookFormat,
+                        onChanged: (value) =>
+                            setState(() => _showKhataBookFormat = value),
                         activeColor: Colors.blue.shade700,
                       ),
                     ],
                   ),
-                  SizedBox(height: 16),
+                  const SizedBox(height: 16),
+                  Row(
+                    children: [
+                      const Text(
+                        'Auto-fit Text',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w500,
+                          color: Colors.black54,
+                        ),
+                      ),
+                      const Spacer(),
+                      Switch(
+                        value: _autoFitText,
+                        onChanged: (value) =>
+                            setState(() => _autoFitText = value),
+                        activeColor: Colors.blue.shade700,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+
                   if (!_autoFitText) ...[
                     Text(
                       'Title Font Size: ${_titleFontSize.toStringAsFixed(1)}',
-                      style: TextStyle(
+                      style: const TextStyle(
                         fontSize: 14,
                         fontWeight: FontWeight.w500,
-                        color: Colors.grey.shade700,
+                        color: Colors.black54,
                       ),
                     ),
                     Slider(
@@ -459,20 +723,17 @@ class _ExportCustomerPdfScreenState extends State<ExportCustomerPdfScreen> {
                       min: Constants.minFontSize,
                       max: Constants.maxFontSize,
                       divisions: 20,
-                      onChanged: (value) {
-                        setState(() {
-                          _titleFontSize = value;
-                        });
-                      },
+                      onChanged: (value) =>
+                          setState(() => _titleFontSize = value),
                       activeColor: Colors.blue.shade700,
                     ),
-                    SizedBox(height: 8),
+                    const SizedBox(height: 8),
                     Text(
                       'Table Font Size: ${_tableFontSize.toStringAsFixed(1)}',
-                      style: TextStyle(
+                      style: const TextStyle(
                         fontSize: 14,
                         fontWeight: FontWeight.w500,
-                        color: Colors.grey.shade700,
+                        color: Colors.black54,
                       ),
                     ),
                     Slider(
@@ -480,11 +741,8 @@ class _ExportCustomerPdfScreenState extends State<ExportCustomerPdfScreen> {
                       min: Constants.minFontSize,
                       max: Constants.maxFontSize,
                       divisions: 20,
-                      onChanged: (value) {
-                        setState(() {
-                          _tableFontSize = value;
-                        });
-                      },
+                      onChanged: (value) =>
+                          setState(() => _tableFontSize = value),
                       activeColor: Colors.blue.shade700,
                     ),
                   ],
@@ -503,7 +761,7 @@ class _ExportCustomerPdfScreenState extends State<ExportCustomerPdfScreen> {
                       color: Colors.grey.withOpacity(0.2),
                       spreadRadius: 2,
                       blurRadius: 5,
-                      offset: Offset(0, 3),
+                      offset: const Offset(0, 3),
                     ),
                   ],
                 ),
@@ -514,20 +772,16 @@ class _ExportCustomerPdfScreenState extends State<ExportCustomerPdfScreen> {
                     canChangePageFormat: false,
                     allowPrinting: true,
                     allowSharing: true,
-                    loadingWidget: Center(
+                    loadingWidget: const Center(
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          CircularProgressIndicator(
-                            valueColor: AlwaysStoppedAnimation<Color>(
-                              Colors.blue.shade700,
-                            ),
-                          ),
+                          CircularProgressIndicator(),
                           SizedBox(height: 16),
                           Text(
                             'Generating PDF...',
                             style: TextStyle(
-                              color: Colors.grey.shade600,
+                              color: Colors.black54,
                               fontSize: 16,
                             ),
                           ),
@@ -538,12 +792,12 @@ class _ExportCustomerPdfScreenState extends State<ExportCustomerPdfScreen> {
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          Icon(
+                          const Icon(
                             Icons.error_outline,
-                            color: Colors.red.shade400,
+                            color: Colors.red,
                             size: 48,
                           ),
-                          SizedBox(height: 16),
+                          const SizedBox(height: 16),
                           Text(
                             'Error generating PDF',
                             style: TextStyle(
@@ -552,12 +806,12 @@ class _ExportCustomerPdfScreenState extends State<ExportCustomerPdfScreen> {
                               fontWeight: FontWeight.w500,
                             ),
                           ),
-                          SizedBox(height: 8),
+                          const SizedBox(height: 8),
                           Text(
                             error.toString(),
                             textAlign: TextAlign.center,
-                            style: TextStyle(
-                              color: Colors.grey.shade600,
+                            style: const TextStyle(
+                              color: Colors.black54,
                               fontSize: 14,
                             ),
                           ),
@@ -568,8 +822,7 @@ class _ExportCustomerPdfScreenState extends State<ExportCustomerPdfScreen> {
                 ),
               ),
             ),
-
-            SizedBox(height: 16),
+            const SizedBox(height: 16),
           ],
         ),
       ),

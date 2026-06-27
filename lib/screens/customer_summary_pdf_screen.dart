@@ -10,7 +10,8 @@ class CustomerSummaryPdfScreen extends StatefulWidget {
   const CustomerSummaryPdfScreen({Key? key}) : super(key: key);
 
   @override
-  _CustomerSummaryPdfScreenState createState() => _CustomerSummaryPdfScreenState();
+  _CustomerSummaryPdfScreenState createState() =>
+      _CustomerSummaryPdfScreenState();
 }
 
 class _CustomerSummaryPdfScreenState extends State<CustomerSummaryPdfScreen> {
@@ -19,6 +20,10 @@ class _CustomerSummaryPdfScreenState extends State<CustomerSummaryPdfScreen> {
   DateTime _endDate = DateTime.now();
   String? _customerName;
   bool _isGenerating = false;
+
+  // OFF => without khatabook (milk table only + totals)
+  // ON  => existing format
+  bool _showKhataBookFormat = false;
 
   @override
   void initState() {
@@ -62,27 +67,79 @@ class _CustomerSummaryPdfScreenState extends State<CustomerSummaryPdfScreen> {
       int customerId = int.parse(_customerIdController.text);
       String start = DateFormat('yyyy-MM-dd').format(_startDate);
       String end = DateFormat('yyyy-MM-dd').format(_endDate);
-      List<MilkEntry> entries = await DatabaseHelper().getMilkEntriesByCustomerAndRange(customerId, start, end);
+      List<MilkEntry> entries = await DatabaseHelper()
+          .getMilkEntriesByCustomerAndRange(customerId, start, end);
 
       if (entries.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('No entries found for the selected date range')),
+          const SnackBar(
+            content: Text('No entries found for the selected date range'),
+          ),
         );
         return;
       }
 
-      Uint8List pdfBytes = await PdfService().generateCustomerSummaryPdf(entries, _customerName!, start, end);
+      final youGotOpening = await DatabaseHelper()
+          .getYouGotTotalBeforeCustomerDate(customerId, start);
+
+      final youGaveOpening = await DatabaseHelper()
+          .getYouGaveTotalBeforeCustomerDate(customerId, start);
+
+      final productSaleOpening = await DatabaseHelper()
+          .getProductSaleTotalBeforeCustomerDate(customerId, start);
+
+      final youGotOpeningRows = [
+        {'amount': youGotOpening},
+      ];
+      final youGaveOpeningRows = [
+        {'amount': youGaveOpening},
+      ];
+      final productSaleOpeningRows = [
+        {'amount': productSaleOpening},
+      ];
+
+      final youGotRows = await DatabaseHelper()
+          .getYouGotEntriesByCustomerAndRange(customerId, start, end);
+      final youGaveRows = await DatabaseHelper()
+          .getYouGaveEntriesByCustomerAndRange(customerId, start, end);
+      final productSaleRows = await DatabaseHelper()
+          .getProductSaleEntriesByCustomerAndRange(customerId, start, end);
+
+      Uint8List pdfBytes = _showKhataBookFormat
+          ? await PdfService().generateCustomerSummaryPdfWithLedger(
+              customerId: customerId,
+              customerName: _customerName!,
+              startDate: start,
+              endDate: end,
+              milkEntriesInRange: entries,
+              youGotEntriesInRange: youGotRows,
+              youGaveEntriesInRange: youGaveRows,
+              productSaleEntriesInRange: productSaleRows,
+              youGotOpening: youGotOpeningRows,
+              youGaveOpening: youGaveOpeningRows,
+              productSaleOpening: productSaleOpeningRows,
+            )
+          : await PdfService().generateCustomerSummaryPdf(
+              entries,
+              _customerName!,
+              start,
+              end,
+            );
 
       // Share the PDF
-      await Printing.sharePdf(bytes: pdfBytes, filename: 'customer_summary_${_customerName}_${DateFormat('ddMMyyyy').format(_startDate)}_${DateFormat('ddMMyyyy').format(_endDate)}.pdf');
+      await Printing.sharePdf(
+        bytes: pdfBytes,
+        filename:
+            'customer_summary_${_customerName}_${DateFormat('ddMMyyyy').format(_startDate)}_${DateFormat('ddMMyyyy').format(_endDate)}.pdf',
+      );
 
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('PDF generated and shared successfully')),
       );
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error generating PDF: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Error generating PDF: $e')));
     } finally {
       setState(() {
         _isGenerating = false;
@@ -172,7 +229,10 @@ class _CustomerSummaryPdfScreenState extends State<CustomerSummaryPdfScreen> {
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(8),
                           ),
-                          prefixIcon: Icon(Icons.person, color: Colors.blue.shade700),
+                          prefixIcon: Icon(
+                            Icons.person,
+                            color: Colors.blue.shade700,
+                          ),
                           filled: true,
                           fillColor: Colors.grey.shade50,
                         ),
@@ -180,10 +240,14 @@ class _CustomerSummaryPdfScreenState extends State<CustomerSummaryPdfScreen> {
                       ),
                       const SizedBox(height: 8),
                       Text(
-                        _customerName == null ? 'Customer Name: Not found' : 'Customer Name: $_customerName',
+                        _customerName == null
+                            ? 'Customer Name: Not found'
+                            : 'Customer Name: $_customerName',
                         style: TextStyle(
                           fontSize: 16,
-                          color: _customerName == null ? Colors.red : Colors.green.shade700,
+                          color: _customerName == null
+                              ? Colors.red
+                              : Colors.green.shade700,
                           fontWeight: FontWeight.w500,
                         ),
                       ),
@@ -215,7 +279,10 @@ class _CustomerSummaryPdfScreenState extends State<CustomerSummaryPdfScreen> {
                       ),
                       const SizedBox(height: 16),
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 8,
+                        ),
                         decoration: BoxDecoration(
                           border: Border.all(color: Colors.grey.shade300),
                           borderRadius: BorderRadius.circular(8),
@@ -228,7 +295,10 @@ class _CustomerSummaryPdfScreenState extends State<CustomerSummaryPdfScreen> {
                               style: const TextStyle(fontSize: 16),
                             ),
                             IconButton(
-                              icon: Icon(Icons.calendar_today, color: Colors.blue.shade700),
+                              icon: Icon(
+                                Icons.calendar_today,
+                                color: Colors.blue.shade700,
+                              ),
                               onPressed: _pickStartDate,
                               padding: EdgeInsets.zero,
                               constraints: const BoxConstraints(),
@@ -238,7 +308,10 @@ class _CustomerSummaryPdfScreenState extends State<CustomerSummaryPdfScreen> {
                       ),
                       const SizedBox(height: 12),
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 8,
+                        ),
                         decoration: BoxDecoration(
                           border: Border.all(color: Colors.grey.shade300),
                           borderRadius: BorderRadius.circular(8),
@@ -251,7 +324,10 @@ class _CustomerSummaryPdfScreenState extends State<CustomerSummaryPdfScreen> {
                               style: const TextStyle(fontSize: 16),
                             ),
                             IconButton(
-                              icon: Icon(Icons.calendar_today, color: Colors.blue.shade700),
+                              icon: Icon(
+                                Icons.calendar_today,
+                                color: Colors.blue.shade700,
+                              ),
                               onPressed: _pickEndDate,
                               padding: EdgeInsets.zero,
                               constraints: const BoxConstraints(),
@@ -266,6 +342,30 @@ class _CustomerSummaryPdfScreenState extends State<CustomerSummaryPdfScreen> {
 
               const SizedBox(height: 24),
 
+              // Khata Book format toggle
+              Row(
+                children: [
+                  const Expanded(
+                    child: Text(
+                      'Khata Book format',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.black87,
+                      ),
+                    ),
+                  ),
+                  Switch(
+                    value: _showKhataBookFormat,
+                    onChanged: (value) =>
+                        setState(() => _showKhataBookFormat = value),
+                    activeColor: Colors.blue.shade700,
+                  ),
+                ],
+              ),
+
+              const SizedBox(height: 16),
+
               // Generate PDF Button
               SizedBox(
                 width: double.infinity,
@@ -277,18 +377,26 @@ class _CustomerSummaryPdfScreenState extends State<CustomerSummaryPdfScreen> {
                           height: 20,
                           child: CircularProgressIndicator(
                             strokeWidth: 2,
-                            valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                            valueColor: AlwaysStoppedAnimation<Color>(
+                              Colors.white,
+                            ),
                           ),
                         )
                       : const Icon(Icons.share),
                   label: Text(
                     _isGenerating ? 'Generating...' : 'Generate & Share PDF',
-                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Colors.green.shade600,
                     foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 24,
+                      vertical: 16,
+                    ),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(12),
                     ),
@@ -314,7 +422,7 @@ class _CustomerSummaryPdfScreenState extends State<CustomerSummaryPdfScreen> {
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
-                        'This will generate a PDF with customer details, milk entries, and totals for the selected date range.',
+                        'This will generate a PDF with customer details, milk entries, and totals for the selected date range. Khata Book toggle will change the PDF layout.',
                         style: TextStyle(
                           color: Colors.blue.shade700,
                           fontSize: 14,

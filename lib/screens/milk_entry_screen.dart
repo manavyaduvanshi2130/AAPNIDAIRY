@@ -1,121 +1,151 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+
+import 'package:aapni_dairy/constants.dart';
 import 'package:aapni_dairy/db/db_helper.dart';
 import 'package:aapni_dairy/models/milk_entry.dart';
-import 'package:aapni_dairy/constants.dart';
 
 class MilkEntryScreen extends StatefulWidget {
-  const MilkEntryScreen({Key? key}) : super(key: key);
+  const MilkEntryScreen({super.key});
 
   @override
-  _MilkEntryScreenState createState() => _MilkEntryScreenState();
+  State<MilkEntryScreen> createState() => _MilkEntryScreenState();
 }
 
 class _MilkEntryScreenState extends State<MilkEntryScreen> {
   final _formKey = GlobalKey<FormState>();
+
   final TextEditingController _customerIdController = TextEditingController();
   final TextEditingController _quantityController = TextEditingController();
   final TextEditingController _fatController = TextEditingController();
   final TextEditingController _snfController = TextEditingController();
+  final TextEditingController _snfKatotiController = TextEditingController();
+
+  bool _isEntriesLoading = false;
+  List<Map<String, dynamic>> _entriesForSelectedDate = [];
 
   final FocusNode _customerIdFocus = FocusNode();
   final FocusNode _quantityFocus = FocusNode();
   final FocusNode _fatFocus = FocusNode();
   final FocusNode _snfFocus = FocusNode();
+  final FocusNode _snfKatotiFocus = FocusNode();
 
   String? _customerName;
   DateTime _selectedDate = DateTime.now();
   String _selectedShift = 'Morning';
-  bool _isAutoShift = true; // Flag to track if shift is automatically set
+
+  bool _isLoading = false;
 
   @override
   void initState() {
     super.initState();
-    _initializeShift();
+    _selectedShift = _getCurrentShift();
+    _refreshEntriesForSelectedDate();
   }
 
-  // Method to determine shift based on current time
   String _getCurrentShift() {
-    DateTime now = DateTime.now();
-    // If current time is 12:00 PM or later, set to Evening, otherwise Morning
+    final now = DateTime.now();
     return now.hour >= 12 ? 'Evening' : 'Morning';
   }
 
-  // Initialize shift automatically when screen loads
-  void _initializeShift() {
-    setState(() {
-      _selectedShift = _getCurrentShift();
-      _isAutoShift = true;
-    });
-  }
-
-  // Method to update shift if user manually changes it
-  void _updateShiftManually(String newShift) {
-    setState(() {
-      _selectedShift = newShift;
-      _isAutoShift = false; // User has manually selected shift
-    });
-  }
-
   Future<void> _fetchCustomerName() async {
-    if (_customerIdController.text.isEmpty) {
-      setState(() {
-        _customerName = null;
-      });
+    final text = _customerIdController.text.trim();
+    if (text.isEmpty) {
+      setState(() => _customerName = null);
       return;
     }
-    int? id = int.tryParse(_customerIdController.text);
+
+    final id = int.tryParse(text);
     if (id == null) {
-      setState(() {
-        _customerName = null;
-      });
+      setState(() => _customerName = null);
       return;
     }
-    String? name = await DatabaseHelper().getCustomerNameById(id);
-    setState(() {
-      _customerName = name;
-    });
+
+    final name = await DatabaseHelper().getCustomerNameById(id);
+    setState(() => _customerName = name);
+  }
+
+  Future<void> _refreshEntriesForSelectedDate() async {
+    setState(() => _isEntriesLoading = true);
+    try {
+      final dateStr = DateFormat('yyyy-MM-dd').format(_selectedDate);
+      _entriesForSelectedDate = await DatabaseHelper()
+          .getMilkEntriesWithCustomerByDate(dateStr);
+    } finally {
+      if (mounted) setState(() => _isEntriesLoading = false);
+    }
+  }
+
+  Future<void> _pickDate() async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _selectedDate,
+      firstDate: DateTime(2000),
+      lastDate: DateTime.now(),
+    );
+
+    if (picked != null && picked != _selectedDate) {
+      setState(() => _selectedDate = picked);
+      await _refreshEntriesForSelectedDate();
+    }
   }
 
   Future<void> _saveMilkEntry() async {
-    if (_formKey.currentState!.validate()) {
-      int customerId = int.parse(_customerIdController.text);
-      double quantity = double.parse(_quantityController.text);
-      double fat = double.parse(_fatController.text);
-      double snf = _snfController.text.isEmpty
-          ? 8.0
-          : double.parse(_snfController.text);
+    if (!_formKey.currentState!.validate()) return;
 
-      double rate = (Constants.rateConstantA * fat) + Constants.rateConstantB;
-      double amount = rate * quantity;
+    setState(() => _isLoading = true);
 
-      MilkEntry entry = MilkEntry(
+    try {
+      final customerId = int.parse(_customerIdController.text.trim());
+      final quantity = double.parse(_quantityController.text.trim());
+      final fat = double.parse(_fatController.text.trim());
+
+      final snf = _snfController.text.trim().isEmpty
+          ? 8.5
+          : double.parse(_snfController.text.trim());
+
+      final snfKatoti = _snfKatotiController.text.trim().isEmpty
+          ? 0.0
+          : double.parse(_snfKatotiController.text.trim());
+
+      final dateStr = DateFormat('yyyy-MM-dd').format(_selectedDate);
+
+      // New logic: snfKatoti is per-liter ₹ deduction, so it reduces rate directly.
+      final rate =
+          (Constants.rateConstantA * fat) + Constants.rateConstantB - snfKatoti;
+      final amount = rate * quantity;
+      final payableAmount = amount;
+
+      final entry = MilkEntry(
         customerId: customerId,
-        date: DateFormat('yyyy-MM-dd').format(_selectedDate),
+        date: dateStr,
         shift: _selectedShift,
         quantity: quantity,
         fat: fat,
         snf: snf,
         rate: rate,
         amount: amount,
+        snfKatoti: snfKatoti,
       );
 
       await DatabaseHelper().insertMilkEntry(entry);
 
-      // Show alert dialog with rate and amount
-      showDialog(
+      await showDialog<void>(
         context: context,
-        builder: (BuildContext context) {
+        builder: (_) {
           return AlertDialog(
             title: const Text('Milk Entry Saved'),
             content: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('✅ Milk entry saved successfully!'),
+                const Text('✅ Milk entry saved successfully!'),
                 const SizedBox(height: 12),
-                Text('📊 Rate: ₹${rate.toStringAsFixed(2)} per liter'),
+                Text('📌 Rate: ₹${rate.toStringAsFixed(2)} per liter'),
                 Text('💰 Amount: ₹${amount.toStringAsFixed(2)}'),
+                Text('💸 SNF Katoti: ₹${snfKatoti.toStringAsFixed(2)}'),
+                Text('💵 Payable Amount: ₹${payableAmount.toStringAsFixed(2)}'),
+
                 Text('🥛 Quantity: ${quantity.toStringAsFixed(2)} L'),
               ],
             ),
@@ -129,23 +159,16 @@ class _MilkEntryScreenState extends State<MilkEntryScreen> {
         },
       );
 
+      // Clear milk fields
       _quantityController.clear();
       _fatController.clear();
       _snfController.clear();
-    }
-  }
+      _snfKatotiController.clear();
 
-  Future<void> _pickDate() async {
-    DateTime? picked = await showDatePicker(
-      context: context,
-      initialDate: _selectedDate,
-      firstDate: DateTime(2000),
-      lastDate: DateTime.now(),
-    );
-    if (picked != null && picked != _selectedDate) {
-      setState(() {
-        _selectedDate = picked;
-      });
+      // Refresh entries for selected date
+      await _refreshEntriesForSelectedDate();
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
@@ -155,10 +178,14 @@ class _MilkEntryScreenState extends State<MilkEntryScreen> {
     _quantityController.dispose();
     _fatController.dispose();
     _snfController.dispose();
+    _snfKatotiController.dispose();
+
     _customerIdFocus.dispose();
     _quantityFocus.dispose();
     _fatFocus.dispose();
     _snfFocus.dispose();
+    _snfKatotiFocus.dispose();
+
     super.dispose();
   }
 
@@ -166,138 +193,212 @@ class _MilkEntryScreenState extends State<MilkEntryScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Milk Entry')),
-      body: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: FocusTraversalGroup(
-          child: Form(
-            key: _formKey,
-            child: ListView(
-              children: [
-                TextFormField(
-                  controller: _customerIdController,
-                  focusNode: _customerIdFocus,
-                  decoration: const InputDecoration(
-                    labelText: 'Customer ID',
-                    border: OutlineInputBorder(),
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: FocusTraversalGroup(
+                child: Form(
+                  key: _formKey,
+                  child: ListView(
+                    children: [
+                      TextFormField(
+                        controller: _customerIdController,
+                        focusNode: _customerIdFocus,
+                        decoration: const InputDecoration(
+                          labelText: 'Customer ID',
+                          border: OutlineInputBorder(),
+                        ),
+                        keyboardType: TextInputType.number,
+                        onChanged: (_) => _fetchCustomerName(),
+                        onFieldSubmitted: (_) =>
+                            FocusScope.of(context).requestFocus(_quantityFocus),
+                        validator: (value) {
+                          final v = value?.trim() ?? '';
+                          if (v.isEmpty) return 'Please enter customer ID';
+                          if (int.tryParse(v) == null) {
+                            return 'Invalid customer ID';
+                          }
+                          if (_customerName == null) {
+                            return 'Customer not found';
+                          }
+                          return null;
+                        },
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        _customerName == null
+                            ? 'Customer Name: '
+                            : 'Customer Name: $_customerName',
+                        style: const TextStyle(fontSize: 16),
+                      ),
+                      const SizedBox(height: 16),
+
+                      // Date + Shift
+                      Row(
+                        children: [
+                          Expanded(
+                            child: InkWell(
+                              onTap: _pickDate,
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 14,
+                                ),
+                                decoration: BoxDecoration(
+                                  border: Border.all(
+                                    color: Colors.grey.shade300,
+                                  ),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: Text(
+                                  'Date: ${DateFormat('yyyy-MM-dd').format(_selectedDate)}',
+                                  style: const TextStyle(fontSize: 14),
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: DropdownButtonFormField<String>(
+                              value: _selectedShift,
+                              items: const [
+                                DropdownMenuItem(
+                                  value: 'Morning',
+                                  child: Text('Morning'),
+                                ),
+                                DropdownMenuItem(
+                                  value: 'Evening',
+                                  child: Text('Evening'),
+                                ),
+                              ],
+                              onChanged: (value) {
+                                if (value != null) {
+                                  setState(() => _selectedShift = value);
+                                }
+                              },
+                              decoration: const InputDecoration(
+                                labelText: 'Shift',
+                                border: OutlineInputBorder(),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+
+                      const SizedBox(height: 16),
+
+                      // Quantity + Fat
+                      Row(
+                        children: [
+                          Expanded(
+                            child: TextFormField(
+                              controller: _quantityController,
+                              focusNode: _quantityFocus,
+                              decoration: const InputDecoration(
+                                labelText: 'Quantity',
+                                border: OutlineInputBorder(),
+                              ),
+                              keyboardType:
+                                  const TextInputType.numberWithOptions(
+                                    decimal: true,
+                                  ),
+                              onFieldSubmitted: (_) => FocusScope.of(
+                                context,
+                              ).requestFocus(_fatFocus),
+                              validator: (value) {
+                                final v = value?.trim() ?? '';
+                                if (v.isEmpty) return 'Please enter quantity';
+                                if (double.tryParse(v) == null) {
+                                  return 'Invalid quantity';
+                                }
+                                return null;
+                              },
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: TextFormField(
+                              controller: _fatController,
+                              focusNode: _fatFocus,
+                              decoration: const InputDecoration(
+                                labelText: 'Fat',
+                                border: OutlineInputBorder(),
+                              ),
+                              keyboardType:
+                                  const TextInputType.numberWithOptions(
+                                    decimal: true,
+                                  ),
+                              onFieldSubmitted: (_) => FocusScope.of(
+                                context,
+                              ).requestFocus(_snfFocus),
+                              validator: (value) {
+                                final v = value?.trim() ?? '';
+                                if (v.isEmpty) return 'Please enter fat';
+                                if (double.tryParse(v) == null) {
+                                  return 'Invalid fat';
+                                }
+                                return null;
+                              },
+                            ),
+                          ),
+                        ],
+                      ),
+
+                      const SizedBox(height: 16),
+
+                      // SNF + SNF Katoti
+                      Row(
+                        children: [
+                          Expanded(
+                            child: TextFormField(
+                              controller: _snfController,
+                              focusNode: _snfFocus,
+                              decoration: const InputDecoration(
+                                labelText: 'SNF (default 8.5)',
+                                border: OutlineInputBorder(),
+                              ),
+                              keyboardType:
+                                  const TextInputType.numberWithOptions(
+                                    decimal: true,
+                                  ),
+                              onFieldSubmitted: (_) => FocusScope.of(
+                                context,
+                              ).requestFocus(_snfKatotiFocus),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: TextFormField(
+                              controller: _snfKatotiController,
+                              focusNode: _snfKatotiFocus,
+                              decoration: const InputDecoration(
+                                labelText: 'SNF Katoti (default 0.0)',
+                                border: OutlineInputBorder(),
+                              ),
+                              keyboardType:
+                                  const TextInputType.numberWithOptions(
+                                    decimal: true,
+                                  ),
+                              onFieldSubmitted: (_) => _saveMilkEntry(),
+                            ),
+                          ),
+                        ],
+                      ),
+
+                      const SizedBox(height: 24),
+
+                      ElevatedButton(
+                        onPressed: _saveMilkEntry,
+                        child: const Text('Save'),
+                      ),
+
+                      const SizedBox(height: 16),
+                    ],
                   ),
-                  keyboardType: TextInputType.number,
-                  onChanged: (value) => _fetchCustomerName(),
-                  onFieldSubmitted: (_) =>
-                      FocusScope.of(context).requestFocus(_quantityFocus),
-                  validator: (value) {
-                    if (value == null || value.trim().isEmpty) {
-                      return 'Please enter customer ID';
-                    }
-                    if (int.tryParse(value) == null) {
-                      return 'Invalid customer ID';
-                    }
-                    if (_customerName == null) {
-                      return 'Customer not found';
-                    }
-                    return null;
-                  },
                 ),
-                const SizedBox(height: 8),
-                Text(
-                  _customerName == null
-                      ? 'Customer Name: '
-                      : 'Customer Name: $_customerName',
-                  style: const TextStyle(fontSize: 16),
-                ),
-                const SizedBox(height: 16),
-                ListTile(
-                  title: Text(
-                    'Date: ${DateFormat('yyyy-MM-dd').format(_selectedDate)}',
-                  ),
-                  trailing: const Icon(Icons.calendar_today),
-                  onTap: _pickDate,
-                ),
-                const SizedBox(height: 16),
-                DropdownButtonFormField<String>(
-                  value: _selectedShift,
-                  items: const [
-                    DropdownMenuItem(value: 'Morning', child: Text('Morning')),
-                    DropdownMenuItem(value: 'Evening', child: Text('Evening')),
-                  ],
-                  onChanged: (value) {
-                    if (value != null) {
-                      _updateShiftManually(value);
-                    }
-                  },
-                  decoration: const InputDecoration(
-                    labelText: 'Shift',
-                    border: OutlineInputBorder(),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                TextFormField(
-                  controller: _quantityController,
-                  focusNode: _quantityFocus,
-                  decoration: const InputDecoration(
-                    labelText: 'Quantity',
-                    border: OutlineInputBorder(),
-                  ),
-                  keyboardType: const TextInputType.numberWithOptions(
-                    decimal: true,
-                  ),
-                  onFieldSubmitted: (_) =>
-                      FocusScope.of(context).requestFocus(_fatFocus),
-                  validator: (value) {
-                    if (value == null || value.trim().isEmpty) {
-                      return 'Please enter quantity';
-                    }
-                    if (double.tryParse(value) == null) {
-                      return 'Invalid quantity';
-                    }
-                    return null;
-                  },
-                ),
-                const SizedBox(height: 16),
-                TextFormField(
-                  controller: _fatController,
-                  focusNode: _fatFocus,
-                  decoration: const InputDecoration(
-                    labelText: 'Fat',
-                    border: OutlineInputBorder(),
-                  ),
-                  keyboardType: const TextInputType.numberWithOptions(
-                    decimal: true,
-                  ),
-                  onFieldSubmitted: (_) =>
-                      FocusScope.of(context).requestFocus(_snfFocus),
-                  validator: (value) {
-                    if (value == null || value.trim().isEmpty) {
-                      return 'Please enter fat';
-                    }
-                    if (double.tryParse(value) == null) {
-                      return 'Invalid fat';
-                    }
-                    return null;
-                  },
-                ),
-                const SizedBox(height: 16),
-                TextFormField(
-                  controller: _snfController,
-                  focusNode: _snfFocus,
-                  decoration: const InputDecoration(
-                    labelText: 'SNF (default 8.0)',
-                    border: OutlineInputBorder(),
-                  ),
-                  keyboardType: const TextInputType.numberWithOptions(
-                    decimal: true,
-                  ),
-                  onFieldSubmitted: (_) => _saveMilkEntry(),
-                ),
-                const SizedBox(height: 24),
-                ElevatedButton(
-                  onPressed: _saveMilkEntry,
-                  child: const Text('Save'),
-                ),
-              ],
+              ),
             ),
-          ),
-        ),
-      ),
     );
   }
 }

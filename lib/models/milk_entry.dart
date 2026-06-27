@@ -8,6 +8,7 @@ class MilkEntry {
   double snf;
   double rate;
   double amount;
+  double snfKatoti;
 
   MilkEntry({
     this.id,
@@ -16,9 +17,10 @@ class MilkEntry {
     required this.shift,
     required this.quantity,
     required this.fat,
-    this.snf = 8.0,
+    this.snf = 8.5,
     this.rate = 0.0,
     this.amount = 0.0,
+    this.snfKatoti = 0.0,
   });
 
   Map<String, dynamic> toMap() {
@@ -32,6 +34,22 @@ class MilkEntry {
       'snf': snf,
       'rate': rate,
       'amount': amount,
+      'snf_katoti': snfKatoti,
+    };
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'customer_id': customerId,
+      'date': date,
+      'shift': shift,
+      'quantity': quantity,
+      'fat': fat,
+      'snf': snf,
+      'rate': rate,
+      'amount': amount,
+      'snf_katoti': snfKatoti,
     };
   }
 
@@ -43,9 +61,10 @@ class MilkEntry {
       shift: map['shift'],
       quantity: map['quantity'],
       fat: map['fat'],
-      snf: map['snf'] ?? 8.0,
+      snf: map['snf'] ?? 8.5,
       rate: map['rate'],
       amount: map['amount'],
+      snfKatoti: map['snf_katoti'] ?? 0.0,
     );
   }
 }

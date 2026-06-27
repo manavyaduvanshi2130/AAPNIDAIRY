@@ -1,10 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import '../services/auth_service.dart';
-import '../services/firestore_service.dart';
+
 import '../db/db_helper.dart';
-import '../models/customer.dart';
-import '../models/milk_entry.dart';
 import '../constants.dart';
 import 'home_screen.dart';
 
@@ -16,42 +13,30 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
-  final _authService = AuthService();
-  final _firestoreService = FirestoreService();
   final _formKey = GlobalKey<FormState>();
-  final _emailController = TextEditingController();
-  final _passwordController = TextEditingController();
   final _dairyNameController = TextEditingController();
   final _ownerNameController = TextEditingController();
   final _mobileController = TextEditingController();
 
-  bool _isLogin = true;
+  bool _acceptedDisclaimer = false;
+
   bool _isLoading = false;
-  bool _isAgreed = false;
   String? _errorMessage;
 
   @override
   void initState() {
     super.initState();
-    _loadExistingData();
+    // Login screen pe fields blank rakhne ke liye prefilled data load nahi kiya ja raha.
   }
 
-  Future<void> _loadExistingData() async {
-    final prefs = await SharedPreferences.getInstance();
-    setState(() {
-      _dairyNameController.text = prefs.getString('dairyName') ?? '';
-      _ownerNameController.text = prefs.getString('ownerName') ?? '';
-      _mobileController.text = prefs.getString('mobileNumber') ?? '';
-    });
-  }
+  // NOTE: Intentionally removed login prefill to force user input.
+  // Previously this screen loaded saved values from SharedPreferences.
 
-  Future<void> _authenticate() async {
+  Future<void> _continue() async {
     if (!_formKey.currentState!.validate()) return;
-
-    // For signup, check if agreed to terms
-    if (!_isLogin && !_isAgreed) {
+    if (!_acceptedDisclaimer) {
       setState(() {
-        _errorMessage = 'Please agree to the terms and conditions';
+        _errorMessage = 'Please accept the disclaimer to continue.';
       });
       return;
     }
@@ -62,54 +47,38 @@ class _LoginScreenState extends State<LoginScreen> {
     });
 
     try {
-      if (_isLogin) {
-        // Login
-        await _authService.signIn(
-          _emailController.text,
-          _passwordController.text,
-        );
+      final dairyName = _dairyNameController.text.trim();
+      final ownerName = _ownerNameController.text.trim();
+      final mobileNumber = _mobileController.text.trim();
 
-        // Migrate local data to Firestore if first login
-        await _migrateLocalDataIfNeeded();
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('dairyName', dairyName);
+      await prefs.setString('ownerName', ownerName);
+      await prefs.setString('mobileNumber', mobileNumber);
 
-        // Save dairy details to SharedPreferences
-        await _saveDairyDetails();
+      await DatabaseHelper().saveDairyDetails(
+        dairyName: dairyName,
+        ownerName: ownerName,
+        mobileNumber: mobileNumber,
+      );
 
-        // Navigate to home
-        if (mounted) {
-          Navigator.of(context).pushReplacement(
-            MaterialPageRoute(
-              builder: (context) => HomeScreen(
-                dairyName: _dairyNameController.text,
-                ownerName: _ownerNameController.text,
-                mobileNumber: _mobileController.text,
-              ),
-            ),
-          );
-        }
-      } else {
-        // Sign up
-        await _authService.signUp(
-          _emailController.text,
-          _passwordController.text,
-        );
+      Constants.dairyName = dairyName;
+      Constants.ownerName = ownerName;
+      Constants.mobileNumber = mobileNumber;
 
-        // Save dairy details to SharedPreferences
-        await _saveDairyDetails();
+      // Mark initial login completed so next app start can go directly to Home
+      await prefs.setBool('hasCompletedInitialLogin', true);
 
-        // Navigate to home
-        if (mounted) {
-          Navigator.of(context).pushReplacement(
-            MaterialPageRoute(
-              builder: (context) => HomeScreen(
-                dairyName: _dairyNameController.text,
-                ownerName: _ownerNameController.text,
-                mobileNumber: _mobileController.text,
-              ),
-            ),
-          );
-        }
-      }
+      if (!mounted) return;
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(
+          builder: (context) => HomeScreen(
+            dairyName: dairyName,
+            ownerName: ownerName,
+            mobileNumber: mobileNumber,
+          ),
+        ),
+      );
     } catch (e) {
       setState(() {
         _errorMessage = e.toString();
@@ -120,79 +89,6 @@ class _LoginScreenState extends State<LoginScreen> {
           _isLoading = false;
         });
       }
-    }
-  }
-
-  Future<void> _migrateLocalDataIfNeeded() async {
-    try {
-      // Check if migration already done
-      final prefs = await SharedPreferences.getInstance();
-      final migrated = prefs.getBool('dataMigrated') ?? false;
-      if (migrated) return;
-
-      // Get local data
-      final customers = await DatabaseHelper().getAllCustomers();
-      final milkEntries = await DatabaseHelper().getAllMilkEntries();
-
-      // Get settings
-      final settings = <String, String>{};
-      final dairyName = await DatabaseHelper().getSetting('dairyName');
-      final ownerName = await DatabaseHelper().getSetting('ownerName');
-      final mobileNumber = await DatabaseHelper().getSetting('mobileNumber');
-
-      if (dairyName != null) settings['dairyName'] = dairyName;
-      if (ownerName != null) settings['ownerName'] = ownerName;
-      if (mobileNumber != null) settings['mobileNumber'] = mobileNumber;
-
-      // Migrate to Firestore
-      if (customers.isNotEmpty ||
-          milkEntries.isNotEmpty ||
-          settings.isNotEmpty) {
-        await _firestoreService.migrateLocalDataToFirestore(
-          customers: customers,
-          milkEntries: milkEntries,
-          settings: settings,
-        );
-      }
-
-      // Mark as migrated
-      await prefs.setBool('dataMigrated', true);
-    } catch (e) {
-      print('Error migrating data: $e');
-      // Continue anyway - user can still use the app
-    }
-  }
-
-  Future<void> _saveDairyDetails() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('dairyName', _dairyNameController.text);
-    await prefs.setString('ownerName', _ownerNameController.text);
-    await prefs.setString('mobileNumber', _mobileController.text);
-    await prefs.setBool('isAgreed', true);
-
-    // Update constants
-    Constants.dairyName = _dairyNameController.text;
-    Constants.ownerName = _ownerNameController.text;
-    Constants.mobileNumber = _mobileController.text;
-  }
-
-  Future<void> _resetPassword() async {
-    if (_emailController.text.isEmpty) {
-      setState(() {
-        _errorMessage = 'Please enter your email address';
-      });
-      return;
-    }
-
-    try {
-      await _authService.resetPassword(_emailController.text);
-      setState(() {
-        _errorMessage = 'Password reset email sent. Check your inbox.';
-      });
-    } catch (e) {
-      setState(() {
-        _errorMessage = e.toString();
-      });
     }
   }
 
@@ -216,7 +112,6 @@ class _LoginScreenState extends State<LoginScreen> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   const SizedBox(height: 40),
-                  // Logo
                   Center(
                     child: Image.asset(
                       'assets/images/logo.jpg',
@@ -226,9 +121,8 @@ class _LoginScreenState extends State<LoginScreen> {
                     ),
                   ),
                   const SizedBox(height: 32),
-                  // Title
                   Text(
-                    _isLogin ? 'Welcome to 2130 GROUP' : 'Create Account',
+                    'Welcome to 2130 GROUP',
                     style: Theme.of(context).textTheme.headlineMedium?.copyWith(
                       fontWeight: FontWeight.bold,
                       color: Colors.blue.shade800,
@@ -237,9 +131,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    _isLogin
-                        ? 'Sign in to access your dairy data'
-                        : 'Sign up to start managing your dairy',
+                    'Enter Dairy Details to Continue',
                     style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                       color: Colors.grey.shade600,
                     ),
@@ -247,122 +139,65 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                   const SizedBox(height: 40),
 
-                  // Email field
                   TextFormField(
-                    controller: _emailController,
+                    controller: _dairyNameController,
+                    textInputAction: TextInputAction.next,
                     decoration: const InputDecoration(
-                      labelText: 'Email',
+                      labelText: 'Dairy Name',
+                      hintText: 'e.g. HRB Dairy Kheda',
                       border: OutlineInputBorder(),
-                      prefixIcon: Icon(Icons.email),
+                      prefixIcon: Icon(Icons.storefront_outlined),
                     ),
-                    keyboardType: TextInputType.emailAddress,
                     validator: (value) {
-                      if (value == null || value.isEmpty) {
-                        return 'Please enter email';
-                      }
-                      if (!value.contains('@')) {
-                        return 'Please enter valid email';
+                      final v = value?.trim() ?? '';
+                      if (v.isEmpty) return 'Please enter dairy name';
+                      if (v.length < 2) return 'Dairy name too short';
+                      return null;
+                    },
+                  ),
+
+                  const SizedBox(height: 16),
+
+                  TextFormField(
+                    controller: _ownerNameController,
+                    decoration: const InputDecoration(
+                      labelText: 'Owner Name',
+                      border: OutlineInputBorder(),
+                      prefixIcon: Icon(Icons.person),
+                    ),
+                    validator: (value) {
+                      if (value == null || value.trim().isEmpty) {
+                        return 'Please enter owner name';
                       }
                       return null;
                     },
                   ),
                   const SizedBox(height: 16),
 
-                  // Password field
                   TextFormField(
-                    controller: _passwordController,
+                    controller: _mobileController,
+                    textInputAction: TextInputAction.done,
                     decoration: const InputDecoration(
-                      labelText: 'Password',
+                      labelText: 'Mobile Number',
+                      hintText: '10 digit mobile number',
                       border: OutlineInputBorder(),
-                      prefixIcon: Icon(Icons.lock),
+                      prefixIcon: Icon(Icons.phone_android_outlined),
                     ),
-                    obscureText: true,
+                    keyboardType: TextInputType.phone,
+                    inputFormatters: const [],
                     validator: (value) {
-                      if (value == null || value.isEmpty) {
-                        return 'Please enter password';
-                      }
-                      if (value.length < 6) {
-                        return 'Password must be at least 6 characters';
+                      final v = (value ?? '').trim();
+                      if (v.isEmpty) return 'Please enter mobile number';
+                      if (!RegExp(r'^[0-9]{10}$').hasMatch(v)) {
+                        return 'Enter valid 10-digit mobile number';
                       }
                       return null;
                     },
+                    onFieldSubmitted: (_) => _continue(),
                   ),
+
                   const SizedBox(height: 24),
 
-                  // Dairy details (only for signup)
-                  if (!_isLogin) ...[
-                    TextFormField(
-                      controller: _dairyNameController,
-                      decoration: const InputDecoration(
-                        labelText: 'Dairy Name',
-                        border: OutlineInputBorder(),
-                        prefixIcon: Icon(Icons.business),
-                      ),
-                      validator: (value) {
-                        if (value == null || value.isEmpty) {
-                          return 'Please enter dairy name';
-                        }
-                        return null;
-                      },
-                    ),
-                    const SizedBox(height: 16),
-                    TextFormField(
-                      controller: _ownerNameController,
-                      decoration: const InputDecoration(
-                        labelText: 'Owner Name',
-                        border: OutlineInputBorder(),
-                        prefixIcon: Icon(Icons.person),
-                      ),
-                      validator: (value) {
-                        if (value == null || value.isEmpty) {
-                          return 'Please enter owner name';
-                        }
-                        return null;
-                      },
-                    ),
-                    const SizedBox(height: 16),
-                    TextFormField(
-                      controller: _mobileController,
-                      decoration: const InputDecoration(
-                        labelText: 'Mobile Number',
-                        border: OutlineInputBorder(),
-                        prefixIcon: Icon(Icons.phone),
-                      ),
-                      keyboardType: TextInputType.phone,
-                      validator: (value) {
-                        if (value == null || value.isEmpty) {
-                          return 'Please enter mobile number';
-                        }
-                        if (value.length != 10) {
-                          return 'Please enter valid 10-digit mobile number';
-                        }
-                        return null;
-                      },
-                    ),
-                    const SizedBox(height: 16),
-                    // Agreement Checkbox
-                    Row(
-                      children: [
-                        Checkbox(
-                          value: _isAgreed,
-                          onChanged: (value) {
-                            setState(() {
-                              _isAgreed = value ?? false;
-                            });
-                          },
-                        ),
-                        Expanded(
-                          child: Text(
-                            'Your data will remain with you only. This is a serverless app that works completely offline. If your app gets uninstalled, complete data will be lost. The company will not be responsible for this.',
-                            style: Theme.of(context).textTheme.bodyMedium,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 24),
-                  ],
-
-                  // Error message
                   if (_errorMessage != null)
                     Container(
                       padding: const EdgeInsets.all(12),
@@ -377,12 +212,10 @@ class _LoginScreenState extends State<LoginScreen> {
                         textAlign: TextAlign.center,
                       ),
                     ),
-
                   if (_errorMessage != null) const SizedBox(height: 16),
 
-                  // Auth button
                   ElevatedButton(
-                    onPressed: _isLoading ? null : _authenticate,
+                    onPressed: _isLoading ? null : _continue,
                     style: ElevatedButton.styleFrom(
                       padding: const EdgeInsets.symmetric(vertical: 16),
                       backgroundColor: Colors.blue.shade700,
@@ -402,50 +235,36 @@ class _LoginScreenState extends State<LoginScreen> {
                               ),
                             ),
                           )
-                        : Text(
-                            _isLogin ? 'Sign In' : 'Sign Up',
-                            style: const TextStyle(
+                        : const Text(
+                            'Login',
+                            style: TextStyle(
                               fontSize: 18,
                               fontWeight: FontWeight.bold,
                             ),
                           ),
                   ),
 
-                  const SizedBox(height: 16),
-
-                  // Toggle between login/signup
-                  TextButton(
-                    onPressed: () {
-                      setState(() {
-                        _isLogin = !_isLogin;
-                        _errorMessage = null;
-                      });
-                    },
-                    child: Text(
-                      _isLogin
-                          ? "Don't have an account? Sign Up"
-                          : 'Already have an account? Sign In',
-                      style: TextStyle(color: Colors.blue.shade700),
-                    ),
-                  ),
-
-                  // Forgot password (only for login)
-                  if (_isLogin)
-                    TextButton(
-                      onPressed: _resetPassword,
-                      child: Text(
-                        'Forgot Password?',
-                        style: TextStyle(color: Colors.grey.shade600),
+                  const SizedBox(height: 12),
+                  // Disclaimer checkbox ABOVE login button
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      Checkbox(
+                        value: _acceptedDisclaimer,
+                        onChanged: (v) {
+                          setState(() {
+                            _acceptedDisclaimer = v ?? false;
+                          });
+                        },
                       ),
-                    ),
-
-                  const SizedBox(height: 16),
-                  Text(
-                    'Your data will be securely stored in the cloud and restored on any device after login.',
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: Colors.grey.shade500,
-                    ),
-                    textAlign: TextAlign.center,
+                      Expanded(
+                        child: Text(
+                          'If app get uninstalled, complete data will be lost. The company will not be responsible for this. Please backup data regularly.',
+                          style: Theme.of(context).textTheme.bodySmall
+                              ?.copyWith(color: Colors.grey.shade500),
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ),
@@ -458,8 +277,6 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   void dispose() {
-    _emailController.dispose();
-    _passwordController.dispose();
     _dairyNameController.dispose();
     _ownerNameController.dispose();
     _mobileController.dispose();

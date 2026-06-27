@@ -91,21 +91,29 @@ class _ExportTotalPdfScreenState extends State<ExportTotalPdfScreen> {
         final custName = await db.getCustomerNameById(custId) ?? "Unknown";
 
         if (!summaryMap.containsKey(custId)) {
-          summaryMap[custId] = {'name': custName, 'qty': 0.0, 'amount': 0.0};
+          summaryMap[custId] = {
+            'name': custName,
+            'qty': 0.0,
+            'amount': 0.0,
+            'snfKatoti': 0.0,
+          };
         }
 
         summaryMap[custId]!['qty'] += entry.quantity;
         summaryMap[custId]!['amount'] += entry.amount;
+        summaryMap[custId]!['snfKatoti'] += entry.snfKatoti;
       }
 
       double totalQty = 0;
       double totalAmount = 0;
+      double totalSnfKatoti = 0;
 
       final dataRows = summaryMap.entries.map((e) {
         final id = e.key;
         final data = e.value;
         totalQty += data['qty'];
         totalAmount += data['amount'];
+        totalSnfKatoti += data['snfKatoti'];
         return [
           id.toString(),
           data['name'],
@@ -113,6 +121,8 @@ class _ExportTotalPdfScreenState extends State<ExportTotalPdfScreen> {
           data['amount'].toStringAsFixed(2),
         ];
       }).toList();
+
+      double payableAmount = totalAmount - totalSnfKatoti;
 
       final pdf = pw.Document();
       pdf.addPage(
@@ -148,7 +158,7 @@ class _ExportTotalPdfScreenState extends State<ExportTotalPdfScreen> {
                   style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
                 ),
                 pw.Text(
-                  '${totalQty.toStringAsFixed(2)} L   ₹${totalAmount.toStringAsFixed(2)}',
+                  '${totalQty.toStringAsFixed(2)} L   ₹${payableAmount.toStringAsFixed(2)}',
                 ),
               ],
             ),
