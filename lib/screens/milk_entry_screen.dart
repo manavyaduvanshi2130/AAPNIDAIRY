@@ -98,15 +98,23 @@ class _MilkEntryScreenState extends State<MilkEntryScreen> {
     try {
       final customerId = int.parse(_customerIdController.text.trim());
       final quantity = double.parse(_quantityController.text.trim());
+      // final quantity = double.parse(double.parse(_quantityController.text.trim()).toStringAsFixed(1));
+
       final fat = double.parse(_fatController.text.trim());
+      // final fat = double.parse(double.parse(_fatController.text.trim()).toStringAsFixed(1));
+
 
       final snf = _snfController.text.trim().isEmpty
           ? 8.5
           : double.parse(_snfController.text.trim());
 
+          // double.parse(double.parse(_snfController.text.trim()).toStringAsFixed(1));
+  
       final snfKatoti = _snfKatotiController.text.trim().isEmpty
           ? 0.0
           : double.parse(_snfKatotiController.text.trim());
+ 
+          
 
       final dateStr = DateFormat('yyyy-MM-dd').format(_selectedDate);
 
