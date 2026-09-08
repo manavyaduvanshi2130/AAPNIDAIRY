@@ -157,10 +157,10 @@ class PdfService {
                             'dd-MM-yyyy',
                           ).format(DateTime.parse(entry.date)),
                           _formatShift(entry.shift),
-                          entry.quantity.toStringAsFixed(2),
-                          entry.fat.toStringAsFixed(2),
-                          _calcRate(entry).toStringAsFixed(2),
-                          _calcAmount(entry).toStringAsFixed(2),
+                          entry.quantity.toStringAsFixed(1),
+                          entry.fat.toStringAsFixed(1),
+                          entry.rate.toStringAsFixed(2),
+                          entry.amount.toStringAsFixed(2), 
                         ],
                       )
                       .toList(),
@@ -302,8 +302,8 @@ class PdfService {
         milkTableRows.add([
           DateFormat('dd-MM-yyyy').format(dt),
           _formatShift(entry.shift),
-          entry.quantity.toStringAsFixed(2),
-          entry.fat.toStringAsFixed(2),
+          entry.quantity.toStringAsFixed(1),
+          entry.fat.toStringAsFixed(1),
           entry.rate.toStringAsFixed(2),
           entry.amount.toStringAsFixed(2),
         ]);

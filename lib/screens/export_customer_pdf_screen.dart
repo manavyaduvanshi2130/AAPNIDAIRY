@@ -280,8 +280,8 @@ class _ExportCustomerPdfScreenState extends State<ExportCustomerPdfScreen> {
                                     : entry.shift.toString(),
                                 entry.quantity.toStringAsFixed(1),
                                 entry.fat.toStringAsFixed(1),
-                                _calcRate(entry).toStringAsFixed(2),
-                                _calcAmount(entry).toStringAsFixed(2),
+                                entry.rate.toStringAsFixed(2),       // _calcRate(entry) → entry.rate
+                                entry.amount.toStringAsFixed(2),     // _calcAmount(entry) → entry.amount
                               ],
                             )
                             .toList(),
@@ -332,7 +332,7 @@ class _ExportCustomerPdfScreenState extends State<ExportCustomerPdfScreen> {
                                 entry.quantity.toStringAsFixed(1),
                                 entry.fat.toStringAsFixed(1),
                                 entry.snf.toStringAsFixed(1),
-                                _calcAmount(entry).toStringAsFixed(2),
+                                entry.amount.toStringAsFixed(2),     
                               ],
                             )
                             .toList(),
