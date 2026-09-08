@@ -166,7 +166,6 @@ class _MilkEntryScreenState extends State<MilkEntryScreen> {
           );
         },
       );
-
       // Clear milk fields
       _quantityController.clear();
       _fatController.clear();
@@ -177,6 +176,11 @@ class _MilkEntryScreenState extends State<MilkEntryScreen> {
       await _refreshEntriesForSelectedDate();
     } finally {
       if (mounted) setState(() => _isLoading = false);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _customerIdFocus.requestFocus();
+      }
+    });
     }
   }
 
