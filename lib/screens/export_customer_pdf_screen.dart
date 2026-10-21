@@ -244,7 +244,7 @@ class _ExportCustomerPdfScreenState extends State<ExportCustomerPdfScreen> {
                         headers: const [
                           'Date',
                           'Shift',
-                          'Quantity',
+                          'WT',
                           'Fat',
                           'Rate',
                           'Amount',
@@ -295,7 +295,7 @@ class _ExportCustomerPdfScreenState extends State<ExportCustomerPdfScreen> {
                         headers: const [
                           'Date',
                           'Shift',
-                          'Quantity',
+                          'WT',
                           'Fat',
                           'SNF',
                           'Amount',
@@ -622,130 +622,45 @@ class _ExportCustomerPdfScreenState extends State<ExportCustomerPdfScreen> {
                     ],
                   ),
                   const SizedBox(height: 16),
-                  DropdownButton<String>(
-                    value: _selectedMethod,
-                    items: const [
-                      DropdownMenuItem(
-                        value: 'Method 1',
-                        child: Text('Method 1'),
-                      ),
-                      DropdownMenuItem(
-                        value: 'Method 2',
-                        child: Text('Method 2'),
-                      ),
-                    ],
-                    onChanged: (value) {
-                      if (value != null) {
-                        setState(() => _selectedMethod = value);
-                      }
-                    },
-                  ),
-                  const SizedBox(height: 16),
-                  const Text(
-                    'Page Format',
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w500,
-                      color: Colors.black54,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  DropdownButton<String>(
-                    value: _selectedPageFormat,
-                    isExpanded: true,
-                    items: Constants.pageFormats.keys
-                        .map(
-                          (format) => DropdownMenuItem(
-                            value: format,
-                            child: Text(format),
-                          ),
-                        )
-                        .toList(),
-                    onChanged: (value) {
-                      if (value != null) {
-                        setState(() => _selectedPageFormat = value);
-                      }
-                    },
-                  ),
-                  const SizedBox(height: 16),
+
+                  // Khata Book toggle (left) + Method dropdown (right)
                   Row(
                     children: [
                       const Text(
-                        'Khata Book format',
+                        'Khata Book',
                         style: TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.w500,
                           color: Colors.black54,
                         ),
                       ),
-                      const Spacer(),
                       Switch(
                         value: _showKhataBookFormat,
                         onChanged: (value) =>
                             setState(() => _showKhataBookFormat = value),
                         activeColor: Colors.blue.shade700,
                       ),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                  Row(
-                    children: [
-                      const Text(
-                        'Auto-fit Text',
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w500,
-                          color: Colors.black54,
-                        ),
-                      ),
                       const Spacer(),
-                      Switch(
-                        value: _autoFitText,
-                        onChanged: (value) =>
-                            setState(() => _autoFitText = value),
-                        activeColor: Colors.blue.shade700,
+                      DropdownButton<String>(
+                        value: _selectedMethod,
+                        items: const [
+                          DropdownMenuItem(
+                            value: 'Method 1',
+                            child: Text('Method 1'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'Method 2',
+                            child: Text('Method 2'),
+                          ),
+                        ],
+                        onChanged: (value) {
+                          if (value != null) {
+                            setState(() => _selectedMethod = value);
+                          }
+                        },
                       ),
                     ],
                   ),
-                  const SizedBox(height: 16),
-
-                  if (!_autoFitText) ...[
-                    Text(
-                      'Title Font Size: ${_titleFontSize.toStringAsFixed(1)}',
-                      style: const TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w500,
-                        color: Colors.black54,
-                      ),
-                    ),
-                    Slider(
-                      value: _titleFontSize,
-                      min: Constants.minFontSize,
-                      max: Constants.maxFontSize,
-                      divisions: 20,
-                      onChanged: (value) =>
-                          setState(() => _titleFontSize = value),
-                      activeColor: Colors.blue.shade700,
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'Table Font Size: ${_tableFontSize.toStringAsFixed(1)}',
-                      style: const TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w500,
-                        color: Colors.black54,
-                      ),
-                    ),
-                    Slider(
-                      value: _tableFontSize,
-                      min: Constants.minFontSize,
-                      max: Constants.maxFontSize,
-                      divisions: 20,
-                      onChanged: (value) =>
-                          setState(() => _tableFontSize = value),
-                      activeColor: Colors.blue.shade700,
-                    ),
-                  ],
                 ],
               ),
             ),

@@ -50,7 +50,7 @@ class AppLocalizations {
       'expertise_content':
           '\'Aapni Dairy\' is built on practical needs and proven reliability:',
       'bullet1':
-          '15 Years of Experience: The app is a result of HRB Dairy\'s deep, 15-year understanding of the dairy collection ecosystem.',
+          '15 Years of Experience: The app is a result of HRB Dairy\'s deep, 15+ year understanding of the dairy collection ecosystem.',
       'bullet2':
           'Tested Reliability: It has been successfully operating across 10-12 HRB Dairy centers for the past 6 months, ensuring accuracy and saving significant time.',
       'bullet3':
@@ -61,7 +61,7 @@ class AppLocalizations {
           'Our goal is simple: To provide a digital solution you can trust, proven by our own extensive operational experience.',
       'team_title': 'HRB Dairy Kheda Rampura Team',
       'team_content':
-          'HRB Dairy Team:\nPannaramji Yadav\nMahesh Kumar Yadav (10+ years experience)\nSuresh Kumar Yadav (Marketing Head)\n\nOnline Marketing Team:\nRamesh Kumar Yadav\nRahul Yadav\nNitin Yadav',
+          'HRB Dairy Team:\nPannaramji Yadav\nMahesh Kumar Yadav (20+ years experience)\nSuresh Kumar Yadav (Marketing Head)\n\nOnline Marketing Team:\nRamesh Kumar Yadav\nRahul Yadav\nNitin Yadav',
       'follow_us': 'Follow Our Journey:',
 
       'initializing': 'Initializing AAPNI DAIRY...',

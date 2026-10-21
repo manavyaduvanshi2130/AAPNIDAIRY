@@ -88,8 +88,6 @@ class AboutUsScreen extends StatelessWidget {
                   ),
                   child: Column(
                     children: [
-                      const Icon(Icons.favorite, color: Colors.white, size: 22),
-                      const SizedBox(height: 8),
                       Text(
                         'Aapni Dairy',
                         style: const TextStyle(
@@ -101,7 +99,7 @@ class AboutUsScreen extends StatelessWidget {
                       ),
                       const SizedBox(height: 6),
                       Text(
-                        '(Logo: 2130 FARM - SINCE 2008)',
+                        '(2130 GROUP - SINCE 2008)',
                         style: TextStyle(
                           fontSize: 12.5,
                           fontWeight: FontWeight.w500,
@@ -115,53 +113,6 @@ class AboutUsScreen extends StatelessWidget {
               ),
 
               const SizedBox(height: 18),
-
-              Card(
-                elevation: 3,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.all(16.0),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        '🤝 About Us: Aapni Dairy',
-                        style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.blue.shade800,
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      Text(
-                        localizations.aboutUsContent1,
-                        style: const TextStyle(
-                          fontSize: 15.5,
-                          height: 1.65,
-                          fontWeight: FontWeight.w400,
-                          color: Colors.black87,
-                        ),
-                        textAlign: TextAlign.justify,
-                      ),
-                      const SizedBox(height: 12),
-                      Text(
-                        localizations.aboutUsContent2,
-                        style: const TextStyle(
-                          fontSize: 15.5,
-                          height: 1.65,
-                          fontWeight: FontWeight.w400,
-                          color: Colors.black87,
-                        ),
-                        textAlign: TextAlign.justify,
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-
-              const SizedBox(height: 16),
 
               // Follow Our Journey first (as requested)
               Card(
